@@ -1,0 +1,16 @@
+<!-- src/templates/index.html -->
+<!doctype html>
+<html>
+<head>
+  <title>DR Screening</title>
+</head>
+<body>
+  <h2>Upload fundus image for Diabetic Retinopathy screening</h2>
+  <form action="/predict" method="post" enctype="multipart/form-data">
+    Patient name: <input type="text" name="patient"><br><br>
+    DOB: <input type="text" name="dob"><br><br>
+    Fundus image: <input type="file" name="fundus" accept="image/*"><br><br>
+    <input type="submit" value="Upload & Predict">
+  </form>
+</body>
+</html>

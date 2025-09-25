@@ -1,0 +1,22 @@
+<!-- src/templates/result.html -->
+<!doctype html>
+<html>
+<head>
+  <title>Result</title>
+</head>
+<body>
+  <h2>Prediction Result</h2>
+  <p>Patient: {{patient}}</p>
+  <p>DOB: {{dob}}</p>
+  <p>Prediction: <b>{{prediction}}</b></p>
+  <h3>Probabilities</h3>
+  <ul>
+    {% for idx, p in probs %}
+      <li>{{idx}} - {{p}}</li>
+    {% endfor %}
+  </ul>
+  <p><a href="/download/{{pdf_path}}">Download PDF Report</a></p>
+  <p><a href="/">Back</a></p>
+</body>
+</html>
+

@@ -1,0 +1,10 @@
+flask
+torch>=1.10
+torchvision
+pillow
+opencv-python
+tqdm
+numpy
+pandas
+scikit-learn
+reportlab
