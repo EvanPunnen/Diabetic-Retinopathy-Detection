@@ -88,8 +88,7 @@ coverage.xml
 data/
 outputs/
 models/*.pth
-models/*.pt
-models/*.ckpt
+!models/densenet121_best.pth
 *.log
 logs/
 
