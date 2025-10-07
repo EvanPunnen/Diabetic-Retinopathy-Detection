@@ -49,6 +49,13 @@ class FundusDataset(Dataset):
             
             df = pd.read_csv(labels_csv)
             print(f"CSV columns: {df.columns.tolist()}")
+            
+            # Rename columns to match expected format
+            df = df.rename(columns={
+                'Image name': 'image',
+                'Retinopathy grade': 'label'
+            })
+            
             print("\nLabel distribution in CSV:")
             print(df['label'].value_counts().sort_index())
             

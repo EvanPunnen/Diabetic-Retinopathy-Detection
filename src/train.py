@@ -179,7 +179,7 @@ def main():
     parser.add_argument("--train_csv", default=None)
     parser.add_argument("--val_csv", default=None)
     parser.add_argument("--backbone", default="densenet121")
-    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch", type=int, default=8)  # Reduced batch size
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--out_dir", default="./models")
