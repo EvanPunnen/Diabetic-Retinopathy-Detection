@@ -3,10 +3,9 @@ Module containing model components and architectures for the Diabetic Retinopath
 """
 
 # Import common components for easier access from the package level
-# Uncomment these as needed
-# from .ala import ALA_Module
+from .ala import ALA_Module
 
 # Define what gets imported with "from modules import *"
 __all__ = [
-    # 'ALA_Module',
+    'ALA_Module',
 ]
