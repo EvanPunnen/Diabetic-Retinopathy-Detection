@@ -1,9 +1,9 @@
 """
-STAGE-1: Representation learning for CLANet
+STAGE-2: Attention learning for CLANet
 Dataset: DDR + Messidor (combined)
-IDRiD must NOT be used here
-ALA and CSCA are FROZEN
-RTX 3050 (4GB) SAFE VERSION
+Loads Stage-1 weights
+ALA and CSCA are UNFROZEN
+RTX 3050 (4GB) SAFE
 """
 
 import sys
@@ -19,7 +19,6 @@ from torchvision import transforms
 from PIL import Image
 import pandas as pd
 from tqdm import tqdm
-import json
 
 from model.clanet import CLANet_DenseNet
 
@@ -30,20 +29,21 @@ torch.backends.cudnn.benchmark = True
 torch.cuda.empty_cache()
 
 # ===============================
-# CONFIG (CRITICAL CHANGES)
+# CONFIG (STAGE-2)
 # ===============================
 CONFIG = {
     "data_root": project_root / "data/processed/combined",
     "model_dir": project_root / "models",
+    "stage1_ckpt": project_root / "models/clanet_stage1.pth",
     "num_classes": 5,
-    "batch_size": 2,          # 🔥 REQUIRED for 4GB GPU
-    "epochs": 40,
-    "lr": 1e-4,
+    "batch_size": 2,
+    "epochs": 20,
+    "lr": 1e-5,               # lower LR for attention
     "weight_decay": 1e-4,
     "image_size": 224,
-    "num_workers": 1,         # 🔥 Windows safe
+    "num_workers": 1,
     "device": "cuda" if torch.cuda.is_available() else "cpu",
-    "early_stopping": 10
+    "early_stopping": 7
 }
 
 # ===============================
@@ -67,7 +67,7 @@ class DRDataset(Dataset):
         return img, label
 
 # ===============================
-# TRANSFORMS (SAFE FOR DR)
+# TRANSFORMS
 # ===============================
 def train_tf(size):
     return transforms.Compose([
@@ -88,7 +88,7 @@ def val_tf(size):
     ])
 
 # ===============================
-# TRAIN / VAL (AMP ENABLED)
+# TRAIN / VALIDATE (AMP)
 # ===============================
 def train_epoch(model, loader, criterion, optimizer, scaler):
     model.train()
@@ -133,17 +133,18 @@ def validate(model, loader, criterion):
 # MAIN
 # ===============================
 def main():
-    print("\n===== STAGE-1: CLANet Training =====")
+    print("\n===== STAGE-2: CLANet Attention Training =====")
     print("Device:", CONFIG["device"])
 
+    assert CONFIG["stage1_ckpt"].exists(), "❌ Stage-1 checkpoint not found"
     CONFIG["model_dir"].mkdir(exist_ok=True)
 
-    train_ds = DRDataset(CONFIG["data_root"]/ "train_labels.csv",
-                          CONFIG["data_root"]/ "train",
-                          train_tf(CONFIG["image_size"]))
-    val_ds = DRDataset(CONFIG["data_root"]/ "val_labels.csv",
-                        CONFIG["data_root"]/ "val",
-                        val_tf(CONFIG["image_size"]))
+    train_ds = DRDataset(CONFIG["data_root"] / "train_labels.csv",
+                         CONFIG["data_root"] / "train",
+                         train_tf(CONFIG["image_size"]))
+    val_ds = DRDataset(CONFIG["data_root"] / "val_labels.csv",
+                       CONFIG["data_root"] / "val",
+                       val_tf(CONFIG["image_size"]))
 
     train_loader = DataLoader(train_ds, batch_size=CONFIG["batch_size"],
                               shuffle=True, num_workers=CONFIG["num_workers"],
@@ -153,19 +154,20 @@ def main():
                             pin_memory=False)
 
     model = CLANet_DenseNet(num_classes=CONFIG["num_classes"]).to(CONFIG["device"])
+    model.load_state_dict(torch.load(CONFIG["stage1_ckpt"], map_location=CONFIG["device"]))
 
-    # 🔒 Freeze attention
-    for p in model.ala.parameters(): p.requires_grad = False
-    for p in model.csca.parameters(): p.requires_grad = False
+    # 🔓 UNFREEZE ALA + CSCA
+    for p in model.ala.parameters(): p.requires_grad = True
+    for p in model.csca.parameters(): p.requires_grad = True
 
-    # 🔒 Freeze BatchNorm stats (critical)
+    # 🔒 Keep BatchNorm stable
     for m in model.modules():
         if isinstance(m, nn.BatchNorm2d):
             m.eval()
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(filter(lambda p:p.requires_grad, model.parameters()),
-                            lr=CONFIG["lr"], weight_decay=CONFIG["weight_decay"])
+    optimizer = optim.AdamW(model.parameters(), lr=CONFIG["lr"],
+                            weight_decay=CONFIG["weight_decay"])
     scaler = torch.cuda.amp.GradScaler()
 
     best, patience = 0, 0
@@ -180,7 +182,7 @@ def main():
         if va_a > best:
             best = va_a
             patience = 0
-            torch.save(model.state_dict(), CONFIG["model_dir"]/ "clanet_stage1.pth")
+            torch.save(model.state_dict(), CONFIG["model_dir"]/ "clanet_stage2.pth")
             print("✓ Saved best model")
         else:
             patience += 1
@@ -188,7 +190,7 @@ def main():
                 print("Early stopping")
                 break
 
-    print(f"\nStage-1 done. Best Val Acc: {best:.2f}%")
+    print(f"\nStage-2 done. Best Val Acc: {best:.2f}%")
 
 if __name__ == "__main__":
     main()
