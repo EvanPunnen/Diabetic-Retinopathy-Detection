@@ -1,6 +1,5 @@
 # ============================================================
-# GENERATE ALL RESULT FIGURES (STAGE-2 MODEL)
-# CORRECT PATHS BASED ON PROJECT STRUCTURE
+# PERFORMANCE MATRIX + FIGURE GENERATION (FIXED)
 # ============================================================
 
 print(">>> GENERATING RESULT FIGURES <<<", flush=True)
@@ -9,190 +8,118 @@ import sys
 from pathlib import Path
 import numpy as np
 import torch
-import pandas as pd
 import matplotlib.pyplot as plt
-from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
-from PIL import Image
-from sklearn.metrics import confusion_matrix
 import seaborn as sns
+from sklearn.metrics import confusion_matrix, classification_report
+import pandas as pd
 
 # ============================================================
-# PATH SETUP (MATCHES YOUR SRC TREE)
+# PATH SETUP
 # ============================================================
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-SRC_DIR = PROJECT_ROOT / "src"
-EVAL_DIR = SRC_DIR / "evaluation"
-RESULTS_DIR = SRC_DIR / "results"
-
-RESULTS_DIR.mkdir(exist_ok=True)
-
-sys.path.insert(0, str(SRC_DIR))
-
-print("Project root:", PROJECT_ROOT, flush=True)
-print("Results dir :", RESULTS_DIR, flush=True)
-
-MODEL_PATH = PROJECT_ROOT / "models" / "clanet_stage2.pth"
-DATA_ROOT = PROJECT_ROOT / "data" / "processed" / "combined"
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from model.clanet import CLANet_DenseNet
+
+RESULTS_DIR = PROJECT_ROOT / "src" / "results" / "final_stage"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+print("Results will be saved to:", RESULTS_DIR, flush=True)
 
 # ============================================================
 # CONFIG
 # ============================================================
-DEVICE = "cpu"
-NUM_CLASSES = 5
-CLASS_NAMES = ["No DR", "Mild", "Moderate", "Severe", "PDR"]
+MODEL_PATH = PROJECT_ROOT / "models" / "clanet_stage2.pth"  # CHANGE if needed
+DATA_ROOT = PROJECT_ROOT / "data" / "processed" / "combined"
+
+CLASS_NAMES = [
+    "No DR", "Mild", "Moderate", "Severe", "Proliferative DR"
+]
 
 # ============================================================
-# DATASET
+# LOAD DATA
 # ============================================================
-class DRDataset(Dataset):
-    def __init__(self, csv, img_dir, tf):
-        self.df = pd.read_csv(csv)
-        self.img_dir = Path(img_dir)
-        self.tf = tf
+df = pd.read_csv(DATA_ROOT / "val_labels.csv")
 
-    def __len__(self):
-        return len(self.df)
-
-    def __getitem__(self, i):
-        r = self.df.iloc[i]
-        img = Image.open(self.img_dir / r["image"]).convert("RGB")
-        return self.tf(img), int(r["label"])
-
-tf = transforms.Compose([
-    transforms.Resize((224,224)),
-    transforms.ToTensor(),
-    transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225])
-])
-
-val_ds = DRDataset(
-    DATA_ROOT / "val_labels.csv",
-    DATA_ROOT / "val",
-    tf
-)
-val_loader = DataLoader(val_ds, batch_size=1, shuffle=False)
-
-print("Validation samples:", len(val_ds), flush=True)
+images_dir = DATA_ROOT / "val"
 
 # ============================================================
 # LOAD MODEL
 # ============================================================
-model = CLANet_DenseNet(num_classes=NUM_CLASSES)
-model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = CLANet_DenseNet(num_classes=5).to(device)
+model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model.eval()
 
 # ============================================================
 # INFERENCE
 # ============================================================
-preds, labels, confidences = [], [], []
+y_true, y_pred = [], []
+
+from torchvision import transforms
+from PIL import Image
+
+tf = transforms.Compose([
+    transforms.Resize((224,224)),
+    transforms.ToTensor()
+])
 
 with torch.no_grad():
-    for x,y in val_loader:
+    for _, row in df.iterrows():
+        img = Image.open(images_dir / row["image"]).convert("RGB")
+        x = tf(img).unsqueeze(0).to(device)
         out = model(x)
-        prob = torch.softmax(out, dim=1)
-        conf, pred = torch.max(prob, dim=1)
-        preds.append(pred.item())
-        labels.append(y.item())
-        confidences.append(conf.item())
-
-preds = np.array(preds)
-labels = np.array(labels)
-confidences = np.array(confidences)
+        y_pred.append(out.argmax(1).item())
+        y_true.append(int(row["label"]))
 
 # ============================================================
-# 1. CONFUSION MATRIX
+# CONFUSION MATRIX
 # ============================================================
-cm = confusion_matrix(labels, preds)
+cm = confusion_matrix(y_true, y_pred)
 
-plt.figure(figsize=(7,6))
-sns.heatmap(
-    cm,
-    annot=True,
-    fmt="d",
-    cmap="Blues",
-    xticklabels=CLASS_NAMES,
-    yticklabels=CLASS_NAMES
-)
+plt.figure(figsize=(8,6))
+sns.heatmap(cm, annot=True, fmt="d",
+            xticklabels=CLASS_NAMES,
+            yticklabels=CLASS_NAMES,
+            cmap="Blues")
+plt.title("Confusion Matrix")
 plt.xlabel("Predicted")
 plt.ylabel("True")
-plt.title("Confusion Matrix")
-plt.tight_layout()
-plt.savefig(RESULTS_DIR / "confusion_matrix.png", dpi=300)
+
+cm_path = RESULTS_DIR / "confusion_matrix.png"
+plt.savefig(cm_path, dpi=300, bbox_inches="tight")
 plt.close()
 
-# ============================================================
-# 2. TRAIN VS VAL LOSS CURVE
-# (Use representative values if logs not stored)
-# ============================================================
-train_loss = [1.62, 0.98, 0.55, 0.31, 0.22, 0.19]
-val_loss   = [1.58, 1.01, 0.72, 0.44, 0.38, 0.35]
-
-plt.figure()
-plt.plot(train_loss, label="Train Loss")
-plt.plot(val_loss, label="Validation Loss")
-plt.xlabel("Epoch")
-plt.ylabel("Loss")
-plt.title("Training vs Validation Loss")
-plt.legend()
-plt.grid()
-plt.savefig(RESULTS_DIR / "loss_curve.png", dpi=300)
-plt.close()
+print("✔ Saved:", cm_path)
 
 # ============================================================
-# 3. VALIDATION ACCURACY CURVE
+# CLASSIFICATION REPORT
 # ============================================================
-val_acc = [65.3, 71.8, 76.2, 79.1, 80.7, 80.7]
-
-plt.figure()
-plt.plot(val_acc, marker="o")
-plt.xlabel("Epoch")
-plt.ylabel("Accuracy (%)")
-plt.title("Validation Accuracy Curve")
-plt.grid()
-plt.savefig(RESULTS_DIR / "val_accuracy_curve.png", dpi=300)
-plt.close()
-
-# ============================================================
-# 4. CONFIDENCE CURVE
-# ============================================================
-bins = np.linspace(0,1,11)
-bin_acc = []
-
-for i in range(len(bins)-1):
-    idx = (confidences >= bins[i]) & (confidences < bins[i+1])
-    bin_acc.append((preds[idx] == labels[idx]).mean() if idx.sum() else 0)
-
-plt.figure()
-plt.plot(bins[:-1], bin_acc, marker="o")
-plt.xlabel("Prediction Confidence")
-plt.ylabel("Accuracy")
-plt.title("Confidence vs Accuracy Curve")
-plt.grid()
-plt.savefig(RESULTS_DIR / "confidence_curve.png", dpi=300)
-plt.close()
-
-# ============================================================
-# 5. PARAMETER ANALYSIS TABLE
-# ============================================================
-params = [
-    ("DenseNet Backbone", sum(p.numel() for p in model.features.parameters())),
-    ("ALA Module", sum(p.numel() for p in model.ala.parameters())),
-    ("CSCA Module", sum(p.numel() for p in model.csca.parameters())),
-    ("Classifier", sum(p.numel() for p in model.classifier.parameters())),
-]
-
-fig, ax = plt.subplots()
-ax.axis("off")
-table = ax.table(
-    cellText=[[p[0], f"{p[1]:,}"] for p in params],
-    colLabels=["Component", "Parameters"],
-    loc="center"
+report = classification_report(
+    y_true, y_pred, target_names=CLASS_NAMES, digits=4
 )
-table.scale(1,2)
-plt.title("Parameter Distribution")
-plt.savefig(RESULTS_DIR / "parameter_analysis.png", dpi=300)
+
+report_path = RESULTS_DIR / "classification_report.txt"
+with open(report_path, "w") as f:
+    f.write(report)
+
+print("✔ Saved:", report_path)
+
+# ============================================================
+# PER-CLASS ACCURACY BAR PLOT
+# ============================================================
+per_class_acc = cm.diagonal() / cm.sum(axis=1)
+
+plt.figure(figsize=(8,5))
+plt.bar(CLASS_NAMES, per_class_acc)
+plt.ylabel("Accuracy")
+plt.title("Per-Class Accuracy")
+plt.xticks(rotation=30)
+
+bar_path = RESULTS_DIR / "per_class_accuracy.png"
+plt.savefig(bar_path, dpi=300, bbox_inches="tight")
 plt.close()
 
-print("✅ ALL FIGURES GENERATED IN src/results/", flush=True)
+print("✔ Saved:", bar_path)
+
+print("\n>>> ALL RESULTS GENERATED SUCCESSFULLY <<<")

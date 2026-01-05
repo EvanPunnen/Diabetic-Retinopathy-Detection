@@ -1,141 +1,63 @@
-import torch
-import numpy as np
-import pandas as pd
-from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
-from pathlib import Path
-from PIL import Image
+# ============================================================
+# OVERALL COMBINED ACCURACY (FINAL REPORTED METRIC)
+# ============================================================
 
-from sklearn.metrics import (
-    confusion_matrix,
-    classification_report,
-    accuracy_score,
-    balanced_accuracy_score,
-    cohen_kappa_score
-)
+import sys
+from pathlib import Path
+import torch
+import pandas as pd
+from PIL import Image
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+from sklearn.metrics import accuracy_score
+
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from model.clanet import CLANet_DenseNet
 
-# ==========================
-# CONFIG
-# ==========================
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-MODEL_PATH = "models/clanet_stage2.pth"   # change for stage-2 or stage-3
-DATA_ROOT = "data/processed/combined"     # use IDRiD path for stage-3
-NUM_CLASSES = 5
-BATCH_SIZE = 4
+MODEL_PATH = PROJECT_ROOT / "models" / "clanet_stage2.pth"
+DATA_ROOT = PROJECT_ROOT / "data" / "processed" / "combined"
 
-CLASS_NAMES = [
-    "No DR",
-    "Mild",
-    "Moderate",
-    "Severe",
-    "Proliferative DR"
-]
-
-# ==========================
-# DATASET
-# ==========================
 class DRDataset(Dataset):
-    def __init__(self, csv_file, img_dir, transform=None):
-        self.df = pd.read_csv(csv_file)
-        self.img_dir = Path(img_dir)
-        self.transform = transform
+    def __init__(self, csv, img_dir):
+        self.df = pd.read_csv(csv)
+        self.img_dir = img_dir
+        self.tf = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor()
+        ])
 
     def __len__(self):
         return len(self.df)
 
-    def __getitem__(self, idx):
-        row = self.df.iloc[idx]
-        img = Image.open(self.img_dir / row["image"]).convert("RGB")
-        label = int(row["label"])
-        if self.transform:
-            img = self.transform(img)
-        return img, label
+    def __getitem__(self, i):
+        r = self.df.iloc[i]
+        img = Image.open(self.img_dir / r["image"]).convert("RGB")
+        return self.tf(img), int(r["label"])
 
-# ==========================
-# TRANSFORMS
-# ==========================
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225]
-    )
-])
-
-# ==========================
-# LOAD DATA
-# ==========================
-val_dataset = DRDataset(
-    csv_file=f"{DATA_ROOT}/val_labels.csv",
-    img_dir=f"{DATA_ROOT}/val",
-    transform=transform
+dataset = DRDataset(
+    DATA_ROOT / "val_labels.csv",
+    DATA_ROOT / "val"
 )
 
-val_loader = DataLoader(
-    val_dataset,
-    batch_size=BATCH_SIZE,
-    shuffle=False
-)
+loader = DataLoader(dataset, batch_size=1)
 
-# ==========================
-# LOAD MODEL
-# ==========================
-model = CLANet_DenseNet(num_classes=NUM_CLASSES).to(DEVICE)
+model = CLANet_DenseNet(num_classes=5).to(DEVICE)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
 model.eval()
 
-# ==========================
-# INFERENCE
-# ==========================
-all_preds = []
-all_labels = []
+y_true, y_pred = [], []
 
 with torch.no_grad():
-    for images, labels in val_loader:
-        images = images.to(DEVICE)
-        outputs = model(images)
-        preds = outputs.argmax(1).cpu().numpy()
-        all_preds.extend(preds)
-        all_labels.extend(labels.numpy())
+    for x, y in loader:
+        x = x.to(DEVICE)
+        out = model(x)
+        y_pred.append(out.argmax(1).item())
+        y_true.append(y.item())
 
-all_preds = np.array(all_preds)
-all_labels = np.array(all_labels)
+acc = accuracy_score(y_true, y_pred)
 
-# ==========================
-# METRICS
-# ==========================
-acc = accuracy_score(all_labels, all_preds)
-bal_acc = balanced_accuracy_score(all_labels, all_preds)
-kappa = cohen_kappa_score(all_labels, all_preds, weights="quadratic")
-cm = confusion_matrix(all_labels, all_preds)
-
-print("\n================ METRICS =================")
-print(f"Overall Accuracy      : {acc*100:.2f}%")
-print(f"Balanced Accuracy     : {bal_acc*100:.2f}%")
-print(f"Cohen's Kappa (Quad)  : {kappa:.4f}")
-
-print("\n========== CLASSIFICATION REPORT ==========")
-print(classification_report(
-    all_labels,
-    all_preds,
-    target_names=CLASS_NAMES,
-    digits=4
-))
-
-print("\n============== CONFUSION MATRIX ==============")
-print(cm)
-
-# ==========================
-# PER-CLASS ACCURACY
-# ==========================
-print("\n========== PER-CLASS ACCURACY ==========")
-for i, name in enumerate(CLASS_NAMES):
-    class_idx = np.where(all_labels == i)[0]
-    if len(class_idx) == 0:
-        print(f"{name}: N/A")
-    else:
-        class_acc = (all_preds[class_idx] == i).mean()
-        print(f"{name}: {class_acc*100:.2f}%")
+print("\n========== FINAL SYSTEM PERFORMANCE ==========")
+print(f"Overall Combined Accuracy: {acc*100:.2f}%")
