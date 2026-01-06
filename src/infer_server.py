@@ -1,4 +1,3 @@
-# src/infer_server.py
 import os
 from flask import Flask, request, render_template, send_file, redirect, url_for
 import torch
