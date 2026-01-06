@@ -5,7 +5,11 @@ import torch
 import torch.nn as nn
 from torch.optim import Adam
 from tqdm import tqdm
-from dataset import FundusDataset, get_transforms
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from data.dataset import FundusDataset, get_transforms
 from modelzoo import build_classifier, save_checkpoint
 from sklearn.metrics import cohen_kappa_score, accuracy_score
 import numpy as np
