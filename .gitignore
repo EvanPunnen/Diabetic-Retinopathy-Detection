@@ -86,6 +86,7 @@ coverage.xml
 
 # Project specific
 data/
+data.zip
 outputs/
 !models/densenet121_best.pth
 *.log
